@@ -1,7 +1,13 @@
+#download csv file from https://www.kaggle.com/lava18/google-play-store-apps#googleplaystore.csv
+
+install.packages("devtools") #if needed
+devtools::install_github("MichaelJMahometa/SDSRegressionR", force = TRUE)
+
 library(dplyr)
 library(lubridate)
+library(car)
+library(SDSRegressionR)
 
-setwd("C:/SDS labs")
 googleData <- read.csv("googleplaystore.csv", stringsAsFactors = FALSE)
 
 #clean the variable names
@@ -48,7 +54,16 @@ googleData$androidver <- as.numeric(
         sub(" and up", "", googleData$androidver, fixed = TRUE))
 
 
-#run initial linear model
+#test few different models, and see which fits best
+
+##run initial linear model
 
 lmgoogle <- lm(rating~ ., data = googleData)
 summary(lmgoogle)
+
+residFitted(lmgoogle)
+cooksPlot(lmgoogle, print.obs= TRUE, sort.obs = TRUE)
+
+
+vif(lmgoogle)
+Anova(lmgoogle, type = "III")
