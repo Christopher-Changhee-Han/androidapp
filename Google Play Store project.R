@@ -26,10 +26,15 @@ googleData <- googleData[-bad_row,]
 
 #clean the variable 'size' to remove M (e.g 19M), convert to numeric from chr
 ## note: varies with device is coerced to NA which serves similar meaning
+## for the purpose of analysis, rows with NA's were replaced with the average
 googleData$size <- as.numeric(sub("M", "", googleData$size, fixed = TRUE))
+sizemean <- round(mean(googleData$size, na.rm = TRUE), digits = 1)
+googleData$size[is.na(googleData$size)] <- sizemean
+
 
 #clean the variable 'price' to remove $ (e.g $2.99), convert to numeric from chr
 googleData$price <- as.numeric(sub("$", "", googleData$price, fixed = TRUE))
+sum(is.na(googleData$price))
 
 #re-format the variables 'category', 'reviews', 'type', 'installs'
 googleData$category <- factor(googleData$category)
@@ -49,21 +54,31 @@ googleData <- googleData[, !names(googleData)
 
 #clean up the variable 'androidver'
 ##remove the 'and up' from '4.2 and up', convert to numeric
-
+##replace the NA's with the average
 googleData$androidver <- as.numeric(
         sub(" and up", "", googleData$androidver, fixed = TRUE))
 
-
+versionmean <- round(mean(googleData$androidver, na.rm = TRUE), digits = 1)
+googleData$androidver[is.na(googleData$androidver)] <- versionmean
 #test few different models, and see which fits best
 
 ##run initial linear model
+fullmodel <- lm(rating~ ., data = googleData)
+summary(fullmodel)
 
-lmgoogle <- lm(rating~ ., data = googleData)
-summary(lmgoogle)
+##check some conditions
+residFitted(fullmodel)
+vif(fullmodel)
 
-residFitted(lmgoogle)
-cooksPlot(lmgoogle, print.obs= TRUE, sort.obs = TRUE)
+Anova(fullmodel, type = "III")
+#get the test error
+#use 2/3 data for training data, 1/3 for test
+set.seed(201)
+twothirds = sample(1:nrow(googleData), 6244)
+train <- googleData[twothirds,]
+test <- googleData[-twothirds,]
+
+lmgoogle <- lm(rating~ ., data = train)
+lm.pred = predict(lmgoogle, test, type = "response")
 
 
-vif(lmgoogle)
-Anova(lmgoogle, type = "III")
