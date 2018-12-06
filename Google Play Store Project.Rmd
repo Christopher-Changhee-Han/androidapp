@@ -1,0 +1,288 @@
+---
+title: "Google Play Store Project"
+author: "Christopher Han"
+date: "December 4, 2018"
+output: html_document
+indent: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#Introduction
+
+Introduce the project here
+
+##Getting started, packages used
+
+Here we load all the packages needed as well as bring in the cleandata function from cleandata.R.
+```{r, message=FALSE}
+#install.packages("devtools") #if needed
+#devtools::install_github("MichaelJMahometa/SDSRegressionR", force = TRUE)
+library(dplyr)
+library(lubridate)
+library(car)
+library(SDSRegressionR)
+library(splines)
+library(boot)
+
+source("cleandata.R")
+
+```
+
+##Read in and clean the data to be ready for analysis
+```{r,  message= FALSE}
+googleData <- read.csv("googleplaystore.csv", stringsAsFactors = FALSE)
+googleData <- cleandata(googleData)
+```  
+The data was fairly clean to begin with, with only minor adjustments to be made. First of all, the variable names were adjusted to remove "." and to be in lower case. Then, we examined the rows to identify any rows with missing values in the 'rating' column and subsequently removed them. As we will see later, there are other columns with missing data as well but we handle those differently since they are not the response variable like 'rating';therefore, it's not a fatal error and we work around it.
+
+It is worth noting that there was one "bad" row with data shifted to the right due to a missing value in one of the columns. We removed that row and subsequently had to reformat the column types since that one row caused some columns to have incorrect structure (e.g character in place of numeric).
+
+Moreover, the columns 'genres', 'currentver' and 'app' were removed. The variable 'genres' heavily overlapped with 'category' and provided very little additional information. The variable 'currentver' varied too much since different applications used different scale to communicate their current version (e.g 1.101 vs. Y4W-GATE_CS-5.0.0). Furthermore, more than 10% of the values for 'currentver' were 'Varies with device' which essentially means that it's not available. The variable 'app' which contained the application name was also removed because the name is irrelevant for this analysis.
+
+##initial analyis of a linear model
+let's run an initial linear model
+```{r}
+fullmodel <- lm(rating~ ., data = googleData)
+#summary(fullmodel)
+Anova(fullmodel, type = "III")
+residFitted(fullmodel)
+```
+
+##calculate MSE
+-calculate the test error of a linear model
+-use 2/3 data for training data, 1/3 for test
+-returns a vector of length two, 
+-[1] is MSE using 1/3 of the data as test
+-[2] is average MSE calculated using 10-fold cross validation with 5 iterations
+```{r}
+set.seed(201)
+results <- setNames(c(0, 0), c("MSE", "c.v MSE"))
+twothirds = sample(1:nrow(googleData), 2*(nrow(googleData)/3))
+train <- googleData[twothirds,]
+test <- googleData[-twothirds,]
+
+#set unused levels of installs to NA
+#id <- which(!(test$installs %in% levels(train$installs)))
+#test$installs[id] <- NA
+lmdata <- lm(rating ~., data = train)
+lm.pred = predict(lmdata, test, type = "response")
+results[1] <- mean((test$rating- lm.pred)^2) #MSE
+
+#what about cross validation error?
+cv.error10=rep(0,5)
+degree= 1:5
+d=1
+for(d in degree){
+        glm.fit=glm(rating~ ., data=googleData)
+        cv.error10[d]=cv.glm(googleData,glm.fit,K=10)$delta[1]
+}
+results[2] <- mean(cv.error10)
+results
+```
+
+##Let's look at some plots
+```{r, echo = FALSE}
+par(mfrow=c(2,3))
+plot(rating~category, data = googleData)
+plot(rating~installs, data = googleData)
+#plot(rating~ reviews, data = googleData) # hard to see, try using only upto 3rd quartile
+with(googleData[googleData$reviews < summary(googleData$reviews)[[5]],], plot(rating ~ reviews))
+plot(rating~ type, data = googleData)
+plot(rating~ price, data = googleData)
+plot(rating~ androidver, data = googleData)
+
+```
+
+
+##Variables that are possibly correlated
+
+###reviews & installs
+perhaps reviews and installs are correlated? let's test it out
+first of all, lets try running a linear model just with reviews
+
+```{r}
+lmreview <- lm(rating~ reviews, data = googleData[googleData$reviews < summary(googleData$reviews)[[5]],])
+residFitted(lmreview)
+summary(lmreview)
+```
+the r squared is very small. hmmmmmmmm, it's possible that the number of reviews may be related to the number of installs. Let's see if there's a linear relationship between the two.
+
+```{r}
+summary(lm(reviews~ installs, data= googleData))
+Anova(lm(reviews~ installs, data= googleData), type = "III")
+```
+it seems like there is a significant relationship. 
+
+### type & price
+we also suspect that type and price carry similar information since type and price are also inherently related.
+
+```{r}
+onlypaid <- googleData[googleData$price != 0,]
+dim(onlypaid)
+```
+
+holy crap, there are only 647 observations out of 9365 that are not $0
+that is only 7% of the data! Let's get rid of obvious outliers in the original plot and plot again
+```{r}
+onlypaid <- onlypaid[onlypaid$price < 100,]
+
+```
+highly right skewed, data heavily concentrated to the left
+lets try to fit a linear, quadratic, cubic, and 10th degree polynomial
+
+```{r, echo=FALSE}
+plot(rating~ price, data = onlypaid, col= "darkgrey", main = "Price vs. Rating (polynomial)")
+
+lmonlypaid <- lm(rating~ price, data = onlypaid)
+abline(lmonlypaid)
+
+quadonlypaid <- lm(rating~ poly(price, 2, raw = TRUE), data = onlypaid)
+abline(quadonlypaid, col= "blue")
+
+cubiconlypaid <- lm(rating~ poly(price, 3, raw = TRUE), data = onlypaid)
+abline(cubiconlypaid, col= "red")
+
+highdegreeonlypaid <- lm(rating~ poly(price, 10, raw = TRUE), data = onlypaid)
+abline(highdegreeonlypaid, col= "green") #similar to linear
+
+#add legend
+```
+let's compare the different fits
+```{r}
+anova(lmonlypaid, quadonlypaid, cubiconlypaid, highdegreeonlypaid)
+```
+polynomials are not helping with the fit.
+
+let's try splines
+```{r}
+fit=lm(rating~bs(price, knots=c(10,20,30)),data=onlypaid)
+plot(rating ~ price,col="darkgrey", data= onlypaid, main = "Price vs. Rating (Spline, Local Regression)")
+lines(onlypaid$price,predict(fit,list(price = onlypaid$price)),col="darkgreen",lwd=2)
+abline(v=c(10,20,30),lty=2,col="darkgreen")
+
+fitsmooth=smooth.spline(onlypaid$rating,onlypaid$price, cv =TRUE)
+lines(fitsmooth,col="red",lwd=2)
+
+fit=loess(rating~price,span=.5,data=onlypaid)
+lines(onlypaid$price, predict(fit, onlypaid$price),col="red",lwd=2)
+
+#add a legend
+```
+all seem to be doing terrible.
+let's leave it as linear for now, but do we really need the variable price?
+it only gives us additional info of 7% of the observations (those that are Paid apps).
+let's calculate the relationship between the two to prepare us for subset selection
+```{r}
+summary(lm(price~ type, data= googleData))
+Anova(lm(price~ type, data= googleData), type = "III") 
+```
+as expected, there is a significant relationship
+
+##let's try backward selection manually
+let's take out price and see if that significantly changes the prediction accuracy
+```{r}
+noprice <- lm(rating~.-price, data = googleData)
+summary(noprice)
+anova(fullmodel, noprice)
+```
+the loss is maybe significant? depends on our alpha, let's look at more predictors.
+let's take out reviews
+```{r}
+noreviews <- lm(rating~. -reviews, data = googleData)
+summary(noreviews)
+anova(fullmodel, noreviews)
+```
+hmm, what about if we remove installs?
+```{r}
+noinstalls <-lm(rating~. -installs, data = googleData)
+summary(noinstalls)
+anova(fullmodel, noinstalls) 
+```
+ok, here we see what removing significant predictor does, let's set our alpha to 0.001 and remove price and reviews from our model.
+```{r}
+updatedmodel <- lm(rating~. - price - reviews, data = googleData)
+summary(updatedmodel)
+Anova(updatedmodel, type = "III")
+```
+
+##let's also remove size and content rating
+```{r}
+updatedmodel2 <- lm(rating~. - price - reviews - size - contentrating, data = googleData)
+summary(updatedmodel2)
+Anova(updatedmodel2)
+```
+
+##compare all the different versions of models
+```{r}
+anova(fullmodel, updatedmodel, updatedmodel2) 
+```
+although our alpha level is 0.001, we keep the variable androidver because it's worth mentioning
+let's make a new dataframe with only those columns we need
+```{r}
+newData <- select(googleData, c("category", "rating", "installs", "type", "lastupdated", "androidver"))
+dim(newData)
+```
+
+##calculate the updated test error, see if it's any different
+
+```{r}
+#calculate the test error
+#use 2/3 data for training data, 1/3 for test
+set.seed(201)
+twothirds2 = sample(1:nrow(newData), 6244)
+train2 <- newData[twothirds,]
+test2 <- newData[-twothirds,]
+
+lmgoogle2 <- lm(rating~ ., data = train2)
+lm.pred2 = predict(lmgoogle2, test2, type = "response")
+
+mean((test2$rating - lm.pred2)^2) #0.261 essentially same
+
+#what about cross validation error?
+cv.error10=rep(0,5)
+degree= 1:5
+d =1
+for(d in degree){
+        glm.fit=glm(rating~., data=newData)
+        cv.error10[d]=cv.glm(newData,glm.fit,K=10)$delta[1]
+} ##0.242 essentially same, removing those variables has no significant effect so we are good
+
+```
+
+
+#look at response variable
+```{r}
+par(mfrow=c(2,2))
+hist(newData$rating, breaks = 100) #oh crap, it's left skewed
+hist((newData$rating)^2, breaks = 100) #squaring it doesn't make too much difference
+boxplot(newData$rating)
+summary(newData$rating) #25% of the data is 1-4, 75% of the data is 4.0 - 5.0
+```
+maybe try dividing data into two and testing the accuracy?
+
+
+##divde data frame into two separate parts
+```{r}
+lessthanfour <- filter(newData, rating < 4)
+morethanfour <- filter(newData, rating >=4)
+```
+let's run linear models on these two
+##linear model less than four
+```{r}
+lmltf <- lm(rating~., data = lessthanfour)
+summary(lmltf)
+Anova(lmltf, type = "III")
+```
+
+##linear model more than four
+```{r}
+lmmtf <- lm(rating~., data = morethanfour)
+summary(lmmtf)
+Anova(lmmtf, type = "III")
+```
+
+#Findings, Conclusion
+
