@@ -2,10 +2,14 @@
 #the data that results should be ready for analysis
 #some variables are modified/removed so read through the code
 
+library(dplyr)
 cleandata <- function(googleData){
 #for convention, make every variable name lower case and without any symbols
         names(googleData) <- tolower(names(googleData))
         names(googleData) <- sub(".", "", names(googleData), fixed = TRUE)
+
+#get rid of duplicate rows
+        googleData <- googleData %>% distinct(app, .keep_all = TRUE)
 
 #remove all rows with missing values of rating
         googleData <- googleData[complete.cases(googleData$rating),]

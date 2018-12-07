@@ -1,20 +1,25 @@
 ---
 title: "Google Play Store Project"
 author: "Christopher Han"
-date: "December 4, 2018"
-output: html_document
-indent: true
+date: "December 7, 2018"
+output:
+  html_document: default
+  pdf_document: default
+indent: yes
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
-
+***
 #Introduction
 
-Introduce the project here
+The android platform, first released in 2008 by Google, is now home to more than 2.6 million applications available on the Google Play Store. From the millions of applications out there, how do consumers choose which application to use and what does it mean for businesses? In this project, we examine a sample of approximately 10,000 applications on Google Play Store in hopes of finding variables that are significant in predicting the application's success. For the purpose of this analysis, we define the application's success to be its rating on a scale of 1 to 5, with 5 being the highest. 
 
-##Getting started, packages used
+The dataset used is from [Kaggle](https://www.kaggle.com/lava18/google-play-store-apps#googleplaystore.csv). The original data was collected by web-scraping from the Google Play Store by the user Lavanya Gupta. 
+
+***  
+##Getting started
 
 Here we load all the packages needed as well as bring in the cleandata function from cleandata.R.
 ```{r, message=FALSE}
@@ -31,42 +36,80 @@ source("cleandata.R")
 
 ```
 
-##Read in and clean the data to be ready for analysis
-```{r,  message= FALSE}
+***  
+##Data cleaning and formatting
+```{r,  message= FALSE, warning = FALSE}
 googleData <- read.csv("googleplaystore.csv", stringsAsFactors = FALSE)
 googleData <- cleandata(googleData)
 ```  
-The data was fairly clean to begin with, with only minor adjustments to be made. First of all, the variable names were adjusted to remove "." and to be in lower case. Then, we examined the rows to identify any rows with missing values in the 'rating' column and subsequently removed them. As we will see later, there are other columns with missing data as well but we handle those differently since they are not the response variable like 'rating';therefore, it's not a fatal error and we work around it.
+The original data contains 10841 observations with 12 predictors and one response. Out of the 10841 observations, 9660 were unique (by application name).
+
+* Predictors
+    + App  
+    + Category  
+    + Reviews  
+    + Size  
+    + Installs  
+    + Type  
+    + Price  
+    + Content.Rating  
+    + Genres  
+    + Last.Updated  
+    + Current.Ver  
+    + Android.Ver  
+
+The data was fairly clean to begin with, with only minor adjustments to be made. First of all, the variable names were adjusted to remove "." and to be in lower case. Then, we examined the rows to identify any rows with missing values in the 'rating' column and subsequently removed them. As we will see later, there are other columns with missing data as well but we handle those differently since they are not the response variable like 'rating'; therefore, it's not a fatal error and we work around it.
 
 It is worth noting that there was one "bad" row with data shifted to the right due to a missing value in one of the columns. We removed that row and subsequently had to reformat the column types since that one row caused some columns to have incorrect structure (e.g character in place of numeric).
 
 Moreover, the columns 'genres', 'currentver' and 'app' were removed. The variable 'genres' heavily overlapped with 'category' and provided very little additional information. The variable 'currentver' varied too much since different applications used different scale to communicate their current version (e.g 1.101 vs. Y4W-GATE_CS-5.0.0). Furthermore, more than 10% of the values for 'currentver' were 'Varies with device' which essentially means that it's not available. The variable 'app' which contained the application name was also removed because the name is irrelevant for this analysis.
 
-##initial analyis of a linear model
-let's run an initial linear model
+A quick look at the cleaned data
+```{r, echo = FALSE}
+head(googleData)
+```
+
+***  
+##Initial look at the variables
+```{r, echo = FALSE}
+par(mfrow=c(3,3), oma = c(0,0,2,0), col= "darkgrey", cex = 0.5)
+boxplot(rating~category, data = googleData, main = "Category")
+with(googleData[googleData$reviews < summary(googleData$reviews)[[5]],], plot(rating ~ reviews, main = "Reviews"))
+plot(rating~size, data = googleData, main = "Size")
+boxplot(rating~installs, data = googleData, main = "Installs")
+boxplot(rating~type, data = googleData, main = "Type")
+plot(rating~price, data = googleData, main = "Price")
+boxplot(rating~contentrating, data = googleData, main = "Content Rating")
+plot(rating~lastupdated, data = googleData, main = "Last Updated")
+plot(rating~androidver, data = googleData, main = "Android Ver.")
+title("Predictors vs. Rating", outer=TRUE, cex.main = 2) 
+```
+
+As we can see here, the quantitative predictors such as reviews, size and price are quite concentrated on the left of the scale. This makes sense since out of ~8000 applications, most are free, small in size, and fairly new or unpopular hence the small number of reviews. In contrast, the predictor lastupdated is quite concentrated to the right, which also makes sense since developers are constantly updating their applications. The skew of some predictors here are quite interesting and we will look more at those later.
+
+***  
+##Linear model
 ```{r}
 fullmodel <- lm(rating~ ., data = googleData)
 #summary(fullmodel)
 Anova(fullmodel, type = "III")
-residFitted(fullmodel)
+residualPlot(fullmodel, main = "Residual vs. Fitted")
 ```
 
-##calculate MSE
--calculate the test error of a linear model
--use 2/3 data for training data, 1/3 for test
--returns a vector of length two, 
--[1] is MSE using 1/3 of the data as test
--[2] is average MSE calculated using 10-fold cross validation with 5 iterations
-```{r}
+The residual plot here shows an interesting pattern that seems to indicate that the response variable is discrete rather than continuous. At first look, this makes no sense since rating is a continuous variable from 1 to 5. In reality, although it is continuous, it behaves like a discrete variable because the ratings are rounded off by one decimal place. Therefore, with the large amount of observations we have in the data, the discrete behavior (essentially 50 discrete values from 1 to 5) is highlighted by the residual plot.
+
+***  
+##Calculate MSE
+
+To calculate the test error of a linear model, two methods were used that are very similar. First one is a basic approach that involves using two-thirds of the data for training and one-third of the test to calculate the MSE. Second one is a 10-fold cross validation with 5 iterations to calculate the MSE 5 times; afterwards, the average was calculated.
+
+```{r, echo = FALSE}
 set.seed(201)
 results <- setNames(c(0, 0), c("MSE", "c.v MSE"))
 twothirds = sample(1:nrow(googleData), 2*(nrow(googleData)/3))
 train <- googleData[twothirds,]
 test <- googleData[-twothirds,]
 
-#set unused levels of installs to NA
-#id <- which(!(test$installs %in% levels(train$installs)))
-#test$installs[id] <- NA
 lmdata <- lm(rating ~., data = train)
 lm.pred = predict(lmdata, test, type = "response")
 results[1] <- mean((test$rating- lm.pred)^2) #MSE
@@ -83,59 +126,66 @@ results[2] <- mean(cv.error10)
 results
 ```
 
-##Let's look at some plots
-```{r, echo = FALSE}
-par(mfrow=c(2,3))
-plot(rating~category, data = googleData)
-plot(rating~installs, data = googleData)
-#plot(rating~ reviews, data = googleData) # hard to see, try using only upto 3rd quartile
-with(googleData[googleData$reviews < summary(googleData$reviews)[[5]],], plot(rating ~ reviews))
-plot(rating~ type, data = googleData)
-plot(rating~ price, data = googleData)
-plot(rating~ androidver, data = googleData)
+The cross validated test error is around 26.6% for the linear model. It is worth mentioning that not all assumptions are met to run the linear regression. 
 
+```{r, echo = FALSE}
+hist(googleData$rating, xlab = "Rating", main = "Frequency Distribution of Rating")
 ```
 
+As we can see, the response variable is not distributed normally, rather it's negatively skewed.
 
+```{r, echo = FALSE}
+par(mfrow=c(2,2), oma= c(0,0,2,0))
+hist(googleData$reviews, xlab = "Reviews", main = "Reviews")
+hist(googleData$size, xlab = "Size", main = "Size")
+hist(googleData$lastupdated, breaks = 30, xlab = "Last Updated", main = "Last Updated")
+hist(googleData$androidver, xlab = "Minimum Android Version", main = "Minimum Android Version")
+title("Frequency Distribution of Quantitative Predictors", outer= TRUE, cex.main = 1.5)
+```
+
+The predictors 'reviews' and 'size' are positively skewed whereas 'last updated' is negatively skewed. The minimum android version seems to be the most normally distributed here out of the plots we looked at so far.
+
+***  
 ##Variables that are possibly correlated
 
-###reviews & installs
-perhaps reviews and installs are correlated? let's test it out
-first of all, lets try running a linear model just with reviews
+When we start to analyze the meaning of the predictors more in depth, we realize that there are possible correlations between some of the variables. For example, as the number of installs increases, naturally one would expect the number of reviews to increase as well. Another correlation, possibly more obvious, would be between type of the application (free or paid) and price. In the next two sections, we run some tests to see if the pair of predictors in question have a significant relationship and if so, whether it is acceptable to remove one.
+
+###Reviews and Installs
+
+In the initial linear model, 'reviews' and 'installs' were both significant predictors of rating. However, there seems to be a relationship between the two if we think of user behavior. Naturally, we expect users to leave reviews for the applications they download. Therefore, the more installs there are, the more reviews there should be. This relationship is tested through a simple linear model.
 
 ```{r}
-lmreview <- lm(rating~ reviews, data = googleData[googleData$reviews < summary(googleData$reviews)[[5]],])
-residFitted(lmreview)
-summary(lmreview)
-```
-the r squared is very small. hmmmmmmmm, it's possible that the number of reviews may be related to the number of installs. Let's see if there's a linear relationship between the two.
-
-```{r}
-summary(lm(reviews~ installs, data= googleData))
+summary(lm(reviews~ installs, data= googleData))$r.squared
 Anova(lm(reviews~ installs, data= googleData), type = "III")
+plot(reviews~ installs, data = googleData, main = "Installs vs. Reviews")
 ```
-it seems like there is a significant relationship. 
 
-### type & price
-we also suspect that type and price carry similar information since type and price are also inherently related.
+As we can see in the summary, installs can account for 41.23% of the variation in reviews. The Anova test also tells us that the relationship is significant. Lastly, we can confirm visually with the plot that the applications with the highest number of installs show distributions with higher mean.
+
+### Type and Price
+
+We also suspect that type and price carry similar information since type and price are also inherently related. First, let's check the number of free applications vs paid applications in our data.
 
 ```{r}
 onlypaid <- googleData[googleData$price != 0,]
 dim(onlypaid)
 ```
 
-holy crap, there are only 647 observations out of 9365 that are not $0
-that is only 7% of the data! Let's get rid of obvious outliers in the original plot and plot again
-```{r}
-onlypaid <- onlypaid[onlypaid$price < 100,]
+There are only 604 observations out of 8195 that are paid applications, about 7% of the data. Clearly, there are way more free applications (although many have in-app purchases) than paid applications in the Google Play Store.
+
+```{r, echo = FALSE}
+onlypaid <- onlypaid[onlypaid$price > 0 & onlypaid$price < 100,] #remove applications in $100-$400 range, $0
+plot(rating~ price, data = onlypaid, col= "darkgrey", main = "Price vs. Rating")
 
 ```
-highly right skewed, data heavily concentrated to the left
-lets try to fit a linear, quadratic, cubic, and 10th degree polynomial
 
-```{r, echo=FALSE}
+Even after removing the extremes (the free and highly expensive applications), the data is heavily concentrated to the left. This makes sense since most applications are priced at $0.99, $1.99, or a similar price to attract users.
+
+As practice, polynomials, splines, and local regression were used to model the data.
+
+###Polynomials, Splines, Local Regression (Non-linear)
+```{r, echo=FALSE, warning = FALSE}
 plot(rating~ price, data = onlypaid, col= "darkgrey", main = "Price vs. Rating (polynomial)")
-
 lmonlypaid <- lm(rating~ price, data = onlypaid)
 abline(lmonlypaid)
 
@@ -146,100 +196,73 @@ cubiconlypaid <- lm(rating~ poly(price, 3, raw = TRUE), data = onlypaid)
 abline(cubiconlypaid, col= "red")
 
 highdegreeonlypaid <- lm(rating~ poly(price, 10, raw = TRUE), data = onlypaid)
-abline(highdegreeonlypaid, col= "green") #similar to linear
+abline(highdegreeonlypaid, col= "green") 
 
-#add legend
+legend("bottomright", legend= c("linear", "quadratic", "cubic", "10th degree"), col= c("black", "blue", "red", "green"), lty= 1)
 ```
-let's compare the different fits
-```{r}
-anova(lmonlypaid, quadonlypaid, cubiconlypaid, highdegreeonlypaid)
-```
-polynomials are not helping with the fit.
 
-let's try splines
-```{r}
-fit=lm(rating~bs(price, knots=c(10,20,30)),data=onlypaid)
+```{r, echo = FALSE, warning = FALSE}
+fit=lm(rating~bs(price, knots=c(3, 10, 40)),data=onlypaid)
 plot(rating ~ price,col="darkgrey", data= onlypaid, main = "Price vs. Rating (Spline, Local Regression)")
 lines(onlypaid$price,predict(fit,list(price = onlypaid$price)),col="darkgreen",lwd=2)
-abline(v=c(10,20,30),lty=2,col="darkgreen")
+abline(v=c(3,10,40),lty=2,col="darkgreen")
 
 fitsmooth=smooth.spline(onlypaid$rating,onlypaid$price, cv =TRUE)
-lines(fitsmooth,col="red",lwd=2)
+lines(fitsmooth,col="blue",lwd=2)
 
 fit=loess(rating~price,span=.5,data=onlypaid)
 lines(onlypaid$price, predict(fit, onlypaid$price),col="red",lwd=2)
 
-#add a legend
+legend("bottomright", legend = c("Cubic Spline", "C.V Smoothing Spline", "Local Regression"), col= c("darkgreen", "blue", "red"), lty= 1)
 ```
-all seem to be doing terrible.
-let's leave it as linear for now, but do we really need the variable price?
-it only gives us additional info of 7% of the observations (those that are Paid apps).
-let's calculate the relationship between the two to prepare us for subset selection
-```{r}
-summary(lm(price~ type, data= googleData))
-Anova(lm(price~ type, data= googleData), type = "III") 
-```
-as expected, there is a significant relationship
 
-##let's try backward selection manually
-let's take out price and see if that significantly changes the prediction accuracy
-```{r}
-noprice <- lm(rating~.-price, data = googleData)
-summary(noprice)
-anova(fullmodel, noprice)
-```
-the loss is maybe significant? depends on our alpha, let's look at more predictors.
-let's take out reviews
-```{r}
-noreviews <- lm(rating~. -reviews, data = googleData)
-summary(noreviews)
-anova(fullmodel, noreviews)
-```
-hmm, what about if we remove installs?
-```{r}
-noinstalls <-lm(rating~. -installs, data = googleData)
-summary(noinstalls)
-anova(fullmodel, noinstalls) 
-```
-ok, here we see what removing significant predictor does, let's set our alpha to 0.001 and remove price and reviews from our model.
+We go back to the question of whether 'price' is really needed for our analysis. It only gives us additional info of 7% of the observations (those that are Paid apps). We ran the same process as previously and found that they did have a significant relationship
+
+***  
+##Backward Subset Selection
+
+Since we identified two pairs of predictors with significant relationships, a backward subsect selection seems appropriate to test whether removing one of the two would hurt the overall performance of the model. First, we removed the predictor 'price' and compared it with the full model. After testing few different models, we decided on the alpha level of 0.001. With the alpha level of 0.001, the model without 'price' and the model without 'reviews' does not lose a significant amount of variance. As we can see below, removing both predictors does not significantly decrease the R squared.
+
 ```{r}
 updatedmodel <- lm(rating~. - price - reviews, data = googleData)
-summary(updatedmodel)
+summary(updatedmodel)$r.squared
 Anova(updatedmodel, type = "III")
 ```
 
-##let's also remove size and content rating
-```{r}
+Size and content rating are two predictors that are not significant and we removed them. Again, the R squared stayed relatively the same.
+
+```{r, echo = FALSE, message = FALSE, include = FALSE}
 updatedmodel2 <- lm(rating~. - price - reviews - size - contentrating, data = googleData)
 summary(updatedmodel2)
 Anova(updatedmodel2)
 ```
 
-##compare all the different versions of models
+
+To make sure we did not remove a significant predictor, an anova test comparing the full model, full model minus 'price' and 'reviews', and a model with only 'category', 'installs', 'type', and 'lastupdated'  was run. As we can see below, with an alpha level of 0.001, removing those 5 predictors does not alter the model significantly.
+
 ```{r}
 anova(fullmodel, updatedmodel, updatedmodel2) 
 ```
-although our alpha level is 0.001, we keep the variable androidver because it's worth mentioning
-let's make a new dataframe with only those columns we need
-```{r}
+
+
+```{r, echo = FALSE}
 newData <- select(googleData, c("category", "rating", "installs", "type", "lastupdated", "androidver"))
-dim(newData)
 ```
 
-##calculate the updated test error, see if it's any different
+Just to confirm that removing the 5 variables does not hurt the model, we calculated the test error again with the same procedure.
 
-```{r}
+```{r, echo = FALSE}
 #calculate the test error
 #use 2/3 data for training data, 1/3 for test
 set.seed(201)
-twothirds2 = sample(1:nrow(newData), 6244)
+twothirds2 = sample(1:nrow(newData), 2*(nrow(newData)/3))
 train2 <- newData[twothirds,]
 test2 <- newData[-twothirds,]
 
 lmgoogle2 <- lm(rating~ ., data = train2)
 lm.pred2 = predict(lmgoogle2, test2, type = "response")
 
-mean((test2$rating - lm.pred2)^2) #0.261 essentially same
+results[1] <- mean((test2$rating - lm.pred2)^2) 
 
 #what about cross validation error?
 cv.error10=rep(0,5)
@@ -248,41 +271,120 @@ d =1
 for(d in degree){
         glm.fit=glm(rating~., data=newData)
         cv.error10[d]=cv.glm(newData,glm.fit,K=10)$delta[1]
-} ##0.242 essentially same, removing those variables has no significant effect so we are good
-
+} 
+results[2] <- mean(cv.error10)
+results
 ```
 
+The cross validated test error is still 26.6%. After removing 5 out of 9 predictors, this is a promising indication that the updated model removed unnecessary predictors and only kept the significant ones.
 
-#look at response variable
-```{r}
+***  
+##Second look at the response variable
+
+Earlier, it was mentioned that the response variable 'rating' is not normally distributed, but rather negatively skewed. Several attempts at transformation were made such as square, square root, and log, none of which affected the skew significantly.
+
+```{r, echo = FALSE}
 par(mfrow=c(2,2))
-hist(newData$rating, breaks = 100) #oh crap, it's left skewed
-hist((newData$rating)^2, breaks = 100) #squaring it doesn't make too much difference
-boxplot(newData$rating)
+hist(newData$rating, breaks = 50, main = "Frequency Distribution of Rating", xlab = "Rating") #oh crap, it's left skewed
+hist((newData$rating)^2, breaks = 50, main = "Frequency Distribution of Rating^2", xlab = "Rating^2") #squaring it doesn't make too much difference
+hist(log(newData$rating), breaks = 50, main = "Frequency Distribution of log(Rating)", xlab = "log(Rating)") #log doesn't change it either
+boxplot(newData$rating, main = "Distribution of Rating")
 summary(newData$rating) #25% of the data is 1-4, 75% of the data is 4.0 - 5.0
 ```
-maybe try dividing data into two and testing the accuracy?
 
+From the summary, we see that 25% of the data has ratings from 1.0 to 4.0 where as 75% of the data has ratings from 4.0 to 5.0. This matches perfectly with what we see in the histogram. Hence, perhaps the model performs differently if we divide the data into two: low ratings (1.0 - 4.0) and high ratings (4.0 - 5.0). 
 
-##divde data frame into two separate parts
 ```{r}
-lessthanfour <- filter(newData, rating < 4)
-morethanfour <- filter(newData, rating >=4)
+lowrating <- filter(newData, rating < 4)
+highrating <- filter(newData, rating >=4)
 ```
-let's run linear models on these two
-##linear model less than four
-```{r}
-lmltf <- lm(rating~., data = lessthanfour)
-summary(lmltf)
+
+```{r, echo = FALSE}
+par(mfrow=c(2,1))
+hist(lowrating$rating, xlab= "Rating", main = "Low Rating")
+hist(highrating$rating, xlab= "Rating", main = "High Rating")
+```
+
+Subsetting the data into two based on the rating slightly helps the normality. When a linear model was fit, the R squared increased to 20.22% for both low rating and high rating.
+
+```{r, echo = FALSE, include= FALSE}
+lmltf <- lm(rating~., data = lowrating)
+summary(lmltf)$r.squared
 Anova(lmltf, type = "III")
 ```
 
-##linear model more than four
-```{r}
-lmmtf <- lm(rating~., data = morethanfour)
-summary(lmmtf)
+```{r, echo = FALSE, include = FALSE}
+lmmtf <- lm(rating~., data = lowrating)
+summary(lmmtf)$r.squared
 Anova(lmmtf, type = "III")
 ```
 
-#Findings, Conclusion
+```{r, echo = FALSE}
+par(mfrow=c(2,3))
+plot(rating~category, data = lowrating)
+plot(rating~installs, data = lowrating)
+plot(rating~type, data = lowrating)
+plot(rating~lastupdated, data = lowrating)
+plot(rating~androidver, data = lowrating)
+residualPlot(lmltf)
+title("Rating < 4.0", outer=TRUE, line = -2) 
+```
+
+```{r, echo = FALSE}
+par(mfrow=c(2,3))
+plot(rating~category, data = highrating)
+plot(rating~installs, data = highrating)
+plot(rating~type, data = highrating)
+plot(rating~lastupdated, data = highrating)
+plot(rating~androidver, data = highrating)
+residualPlot(lmmtf)
+title("Rating >= 4.0", outer=TRUE, line = -2) 
+```
+
+***  
+#Conclusion
+
+```{r, echo = FALSE, include = FALSE}
+#rank category by average rating
+a <- unique(newData$category) #get unique values of category
+b <- vector(length = length(a), mode = "numeric") #create a vector of same length as the unique values
+c = 0 #set counter
+for (i in a){
+    b[c] <- mean(newData[newData$category == i, 2]) #calculate mean of each unique value of installs and store it
+    c = c + 1 #increase counter
+}
+names(b) <- a #assign names to each value
+head(sort(b, decreasing = TRUE)) #get the top values
+
+#rank installs by average rating
+
+d <- unique(newData$installs) #get unique values of installs
+e <- vector(length = length(d), mode = "numeric") #create a vector of same length as the unique values
+f = 0 #set counter  
+for (i in d){
+  e[f] <- mean(newData[newData$installs == i, 2]) #calculate mean of each unique value of installs and store it
+  f = f + 1 #increase counter
+}
+names(e) <- d #assign names to each value
+head(sort(e, decreasing = TRUE)) #get the top values
+tail(sort(e, decreasing = TRUE))
+#free vs paid
+
+typemean <- vector(length =2, mode= "numeric")
+typemean[1] <- mean(newData[newData$type == "Free", 2])
+typemean[2] <- mean(newData[newData$type == "Paid", 2])
+```
+
+In this project, we aimed to identify which predictors are significant in predicting the rating of an application in the Google Play Store. The methods used were linear regression, backward subset selection, cross validation calculation of test error, nonlinear fits such as polynomials, splines, and local regression. 
+
+Out of the initial 12 variables, only 4 were deemed significant with an alpha level of 0.001: category, number of installs, free or paid, and the last updated date. Some of the categories with the highest average rating were entertainment (4.44), dating (4.36) and beauty (4.34). In contrast, as the number of installs went up, the average rating seemed to decrease. Paid applications received better rating than free applications on average (4.26 vs. 4.17). Furthermore, if the application is more recently updated, it is more likely to have a higher rating.
+
+One big limitation of this analysis is that the data is not distributed evenly and most variables are heavily skewed. For this reason, the only reliable predictors of rating that is not heavily influenced by the skew would be the category and the number of installs. If you are a new application developer, it may make sense to explore the entertainment, dating, or beauty categories if you want to achieve the higher rating. However, as your application gets more popular, it is natural for the rating to decrease.
+
+Lastly, although we defined the rating to be the measure of an application's success, one could argue that the number of installs is a better indicator. Another important measure would be the revenue that an application generates. In the future, it would be interesting to develop models that would predict other measures of success such as the ones mentioned earlier.
+
+
+
+
+
 

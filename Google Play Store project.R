@@ -9,46 +9,40 @@ library(car)
 library(SDSRegressionR)
 library(splines)
 library(boot)
+library(gvlma)
 
 source("cleandata.R")
 
-#read in and clean the data to be ready for analysis
 googleData <- read.csv("googleplaystore.csv", stringsAsFactors = FALSE)
-sum(googleData$Current.Ver == "Varies with device")
-googleData <- cleandata(googleData)
-#test few different models, and see which fits best
-##run initial linear model
+googleData <- cleandata(googleData) #cleans, and formats data, reference the source file for details
+
+#run initial linear model
 fullmodel <- lm(rating~ ., data = googleData)
 summary(fullmodel)
 
-##check some conditions
+#check some conditions
 residFitted(fullmodel)
 vif(fullmodel)
 
-##check results
+#check results
 Anova(fullmodel, type = "III")
 
+#check the distribution of rating
+hist(googleData$rating)
+
 #calculate MSE
-#calculate the test error of a linear model
-#use 2/3 data for training data, 1/3 for test
-#returns a vector of length two, 
-#[1] is MSE using 1/3 of the data as test
-#[2] is average MSE calculated using 10-fold cross validation with 5 iterations
 
 set.seed(201)
 results <- setNames(c(0, 0), c("MSE", "c.v MSE"))
-twothirds = sample(1:nrow(googleData), 2*(nrow(googleData)/3))
+twothirds = sample(1:nrow(googleData), 2*(nrow(googleData)/3)) #use 2/3 data for training data, 1/3 for test
 train <- googleData[twothirds,]
 test <- googleData[-twothirds,]
 
-#set unused levels of installs to NA
-#id <- which(!(test$installs %in% levels(train$installs)))
-#test$installs[id] <- NA
 lmdata <- lm(rating ~., data = train)
 lm.pred = predict(lmdata, test, type = "response")
 results[1] <- mean((test$rating- lm.pred)^2) #MSE
 
-#what about cross validation error?
+#average MSE calculated using 10-fold cross validation with 5 iterations
 cv.error10=rep(0,5)
 degree= 1:5
 d=1
@@ -57,215 +51,194 @@ for(d in degree){
         cv.error10[d]=cv.glm(googleData,glm.fit,K=10)$delta[1]
 }
 results[2] <- mean(cv.error10)
-results #0.261, 0.242
+results
 
-#category seems to be significant
-par(mfrow=c(2,3))
-plot(rating~category, data = googleData)
 
-#so does the number of installs
-plot(rating~installs, data = googleData)
+#initial look at the variables
+par(mfrow=c(3,3), oma = c(0,0,2,0), col= "darkgrey", cex = 0.5)
+boxplot(rating~category, data = googleData, main = "Category")
+with(googleData[googleData$reviews < summary(googleData$reviews)[[5]],], plot(rating ~ reviews, main = "Reviews"))
+plot(rating~size, data = googleData, main = "Size")
+boxplot(rating~installs, data = googleData, main = "Installs")
+boxplot(rating~type, data = googleData, main = "Type")
+plot(rating~price, data = googleData, main = "Price")
+boxplot(rating~contentrating, data = googleData, main = "Content Rating")
+plot(rating~lastupdated, data = googleData, main = "Last Updated")
+plot(rating~androidver, data = googleData, main = "Android Ver.")
+title("Predictors vs. Rating", outer=TRUE, cex.main = 2) 
 
-#let's take a look at the number of reviews
-
-plot(rating~ reviews, data = googleData) # hard to see, try using only upto 3rd quartile
-with(googleData[googleData$reviews < summary(googleData$reviews)[[5]],], plot(rating ~ reviews))
-#lets try running a linear model just with reviews
-lmreview <- lm(rating~ reviews, data = googleData[googleData$reviews < summary(googleData$reviews)[[5]],])
-residFitted(lmreview)
-summary(lmreview) #very small R squared
-
-#what about type?
-
-plot(rating~ type, data = googleData)
-
-#category, reviews, installs, type, price, lastupdated, androidver
-#price
-
-plot(rating~ price, data = googleData)
-
-#last updated
-
-plot(rating~ lastupdated, data = googleData)
-
-#android ver
-
-plot(rating~ androidver, data = googleData)
-
-#perhaps reviews and installs are correlated? let's test it out
+#test the relationship between installs and reviews
 
 summary(lm(reviews~ installs, data= googleData))
 Anova(lm(reviews~ installs, data= googleData), type = "III")
-##seems like they do have a significant relationship
 
-#we also suspect that type and price carry similar information
-#type and price is also inherently related
+#test the relationship between price and reviews
 
-onlypaid <- googleData[googleData$price != 0,]
-##holy crap, there are only 647 observations out of 9365 that are not $0
-##that is only 7% of the data!
+summary(lm(price~ type, data= googleData))
+Anova(lm(price~ type, data= googleData), type = "III")
 
+#fit polynomial, splines, local regression on price for practice
+
+onlypaid <- googleData[googleData$price != 0,] #subset data into only paid apps
 plot(rating~ price, data = onlypaid)
-#let's get rid of obvious outliers and plot again
 
 onlypaid <- onlypaid[onlypaid$price < 100,]
-plot(rating~ price, data = onlypaid)
-#highly right skewed, data heavily concentrated to the left
-#lets try to fit a linear line
+plot(rating~ price, data = onlypaid) #examine the data visually
 
-lmonlypaid <- lm(rating~ price, data = onlypaid)
-abline(lmonlypaid) #doesn't look that good, lets try polynomial
-quadonlypaid <- lm(rating~ poly(price, 2, raw = TRUE), data = onlypaid)
+#polynomials
+lmonlypaid <- lm(rating~ price, data = onlypaid) #linear
+abline(lmonlypaid)
+quadonlypaid <- lm(rating~ poly(price, 2, raw = TRUE), data = onlypaid) #quadratic polynomial
 abline(quadonlypaid, col= "blue") #looks worse lmao
 
-cubiconlypaid <- lm(rating~ poly(price, 3, raw = TRUE), data = onlypaid)
+cubiconlypaid <- lm(rating~ poly(price, 3, raw = TRUE), data = onlypaid) #cubic polynomial
 abline(cubiconlypaid, col= "red") #similar to linear
 
-#just for fun
-highdegreeonlypaid <- lm(rating~ poly(price, 10, raw = TRUE), data = onlypaid)
-abline(highdegreeonlypaid, col= "green") #similar to linear
+highdegreeonlypaid <- lm(rating~ poly(price, 10, raw = TRUE), data = onlypaid) #10th degree polynomial, just to prove a point
+abline(highdegreeonlypaid, col= "green")
+ 
+anova(lmonlypaid, quadonlypaid, cubiconlypaid, highdegreeonlypaid) #compare the different fits
 
-#compare the different fits
-anova(lmonlypaid, quadonlypaid, cubiconlypaid, highdegreeonlypaid)
-#polynomials are not helping with the fit
-#let's try splines
+#Splines
 
-fit=lm(rating~bs(price, knots=c(10,20,30)),data=onlypaid)
+fit=lm(rating~bs(price, knots=c(10,20,30)),data=onlypaid) #cubic spline
 plot(rating ~ price,col="darkgrey", data= onlypaid)
 lines(onlypaid$price,predict(fit,list(price = onlypaid$price)),col="darkgreen",lwd=2)
 abline(v=c(10,20,30),lty=2,col="darkgreen")
-#doesn't look good
 
-fitsmooth=smooth.spline(onlypaid$rating,onlypaid$price, cv =TRUE)
+fitsmooth=smooth.spline(onlypaid$rating,onlypaid$price, cv =TRUE) #C.V smoothing spline
 lines(fitsmooth,col="red",lwd=2)
 
-fit=loess(rating~price,span=.5,data=onlypaid)
+fit=loess(rating~price,span=.5,data=onlypaid) #local regression
 lines(onlypaid$price, predict(fit, onlypaid$price),col="red",lwd=2)
 
-#all seem to be doing terrible
-#let's leave it as linear for now, but do we really need the variable price?
-#it only gives us additional info of 7% of the observations (those that are Paid apps)
-#let's calculate the relationship between the two to prepare us for subset selection
+#Backward subset selection
 
-summary(lm(price~ type, data= googleData))
-Anova(lm(price~ type, data= googleData), type = "III") #as expected, there is a significant relationship
-
-#let's try backward selection manually
-#here's the full linear model code again
-fullmodel <- lm(rating~ ., data = googleData)
-summary(fullmodel)
-
-#now let's take out price and see if that significantly changes the prediction accuracy
+#remove price and run anova test
 noprice <- lm(rating~.-price, data = googleData)
 summary(noprice)
-anova(fullmodel, noprice) #the loss is maybe significant? depends on our alpha, let's look at more predictors
+anova(fullmodel, noprice)
 
-#what about reviews and installs
+#remove reviews and run anova teset
 noreviews <- lm(rating~. -reviews, data = googleData)
 summary(noreviews)
 anova(fullmodel, noreviews)
 
+#remove installs and run anova test
 noinstalls <-lm(rating~. -installs, data = googleData)
 summary(noinstalls)
-anova(fullmodel, noinstalls) #ok, here we see what removing significant predictor does,
+anova(fullmodel, noinstalls)
 
 #let's set our alpha to 0.001 and remove price and reviews from our model
 
-updatedmodel <- lm(rating~. - price - reviews, data = googleData)
+updatedmodel <- lm(rating~. - price - reviews, data = googleData) #removes price, reviews
 summary(updatedmodel)
 Anova(updatedmodel, type = "III")
 
-#let's also remove size and content rating
-updatedmodel2 <- lm(rating~. - price - reviews - size - contentrating, data = googleData)
+updatedmodel2 <- lm(rating~. - price - reviews - size - contentrating, data = googleData) #removes size, content rating
 summary(updatedmodel2)
 Anova(updatedmodel2)
 
-#compare all the different versions of models
-anova(fullmodel, updatedmodel, updatedmodel2) 
+anova(fullmodel, updatedmodel, updatedmodel2) #compare all the different versions of models
 
-#although our alpha level is 0.001, we keep the variable androidver because it's worth mentioning
-#let's make a new dataframe with only those columns we need
-
-newData <- select(googleData, c("category", "rating", "installs", "type", "lastupdated", "androidver"))
-dim(newData)
+newData <- select(googleData, c("category", "rating", "installs", "type", "lastupdated"))
+dim(newData) #data frame with the updated model
 
 #calculate the updated test error, see if it's any different
 
-#calculate the test error
-#use 2/3 data for training data, 1/3 for test
 set.seed(201)
-twothirds2 = sample(1:nrow(newData), 6244)
-train2 <- newData[twothirds,]
-test2 <- newData[-twothirds,]
+twothirds2 = sample(1:nrow(newData), 2*nrow(newData)/3) #use 2/3 data for training data, 1/3 for test
+train2 <- newData[twothirds2,]
+test2 <- newData[-twothirds2,]
 
 lmgoogle2 <- lm(rating~ ., data = train2)
 lm.pred2 = predict(lmgoogle2, test2, type = "response")
 
-mean((test2$rating - lm.pred2)^2) #0.261 essentially same
+results[1] <- mean((test2$rating - lm.pred2)^2) 
 
-#what about cross validation error?
+#cross validation test error
 cv.error10=rep(0,5)
 degree= 1:5
 d =1
 for(d in degree){
         glm.fit=glm(rating~., data=newData)
         cv.error10[d]=cv.glm(newData,glm.fit,K=10)$delta[1]
-} ##0.242 essentially same, removing those variables has no significant effect so we are good
+} 
+results[2] <- mean(cv.error10)
+results
 
 
-#create graphics for analysis
-
-plot(rating~ lastupdated, data = newData)
-abline(lm(rating~lastupdated, data = newData))
-hist(newData$lastupdated, breaks = 100)
-
-#plot installs
-hist(newData$androidver, breaks = 10)
-
-#look at response variable
-hist(newData$rating, breaks = 100) #oh crap, it's left skewed
-hist((newData$rating)^2, breaks = 100) #squaring it doesn't make too much difference
-#lets plot the rating variable to see if we can subset it
-
-boxplot(newData$rating)
+#Testing different transformations on the response variable
+par(mfrow=c(2,2))
+hist(newData$rating, breaks = 50, main = "Frequency Distribution of Rating", xlab = "Rating") #oh crap, it's left skewed
+hist((newData$rating)^2, breaks = 50, main = "Frequency Distribution of Rating^2", xlab = "Rating^2") #squaring it doesn't make too much difference
+hist(log(newData$rating), breaks = 50, main = "Frequency Distribution of log(Rating)", xlab = "log(Rating)") #log doesn't change it either
+boxplot(newData$rating, main = "Distribution of Rating")
 summary(newData$rating) #25% of the data is 1-4, 75% of the data is 4.0 - 5.0
 
-#maybe try dividing data into two and testing the accuracy?
-#let's also write a separate file that does the analysis so that we don't write the code everytime
-
-#divde data frame into two separate parts
-lessthanfour <- filter(newData, rating < 4)
-morethanfour <- filter(newData, rating >=4)
+#Subset the data into two parts
+lowrating <- filter(newData, rating < 4) #Rating less than 4.0
+highrating <- filter(newData, rating >=4) #Rating greater than equal to 4.0
 
 #let's run linear models on these two
-#linear model less than four
-lmltf <- lm(rating~., data = lessthanfour)
+lmltf <- lm(rating~., data = lowrating) #Rating less than 4.0
 summary(lmltf)
 Anova(lmltf, type = "III")
 
-#linear model more than four
-lmmtf <- lm(rating~., data = morethanfour)
+lmmtf <- lm(rating~., data = highrating) #Rating greater than equal to 4.0
 summary(lmmtf)
 Anova(lmmtf, type = "III")
 
 #plot the relationships with par, plot
 
 par(mfrow=c(2,3))
-plot(rating~category, data = lessthanfour)
-plot(rating~installs, data = lessthanfour)
-plot(rating~type, data = lessthanfour)
-plot(rating~lastupdated, data = lessthanfour)
-plot(rating~androidver, data = lessthanfour)
+plot(rating~category, data = lowrating)
+plot(rating~installs, data = lowrating)
+plot(rating~type, data = lowrating)
+plot(rating~lastupdated, data = lowrating)
+plot(rating~androidver, data = lowrating)
 residualPlot(lmltf)
 title("Rating < 4.0", outer=TRUE, line = -2) 
 
 #do same for more than four
 
 par(mfrow=c(2,3))
-plot(rating~category, data = morethanfour)
-plot(rating~installs, data = morethanfour)
-plot(rating~type, data = morethanfour)
-plot(rating~lastupdated, data = morethanfour)
-plot(rating~androidver, data = morethanfour)
+plot(rating~category, data = highrating)
+plot(rating~installs, data = highrating)
+plot(rating~type, data = highrating)
+plot(rating~lastupdated, data = highrating)
+plot(rating~androidver, data = highrating)
 residualPlot(lmmtf)
 title("Rating >= 4.0", outer=TRUE, line = -2) 
+
+#rank category by average rating
+a <- unique(newData$category) #get unique values of category
+b <- vector(length = length(a), mode = "numeric") #create a vector of same length as the unique values
+c = 0 #set counter
+for (i in a){
+    b[c] <- mean(newData[newData$category == i, 2]) #calculate mean of each unique value of installs and store it
+    c = c + 1 #increase counter
+}
+names(b) <- a #assign names to each value
+head(sort(b, decreasing = TRUE)) #get the top values
+
+#rank installs by average rating
+
+d <- unique(newData$installs) #get unique values of installs
+e <- vector(length = length(d), mode = "numeric") #create a vector of same length as the unique values
+f = 0 #set counter  
+for (i in d){
+  e[f] <- mean(newData[newData$installs == i, 2]) #calculate mean of each unique value of installs and store it
+  f = f + 1 #increase counter
+}
+names(e) <- d #assign names to each value
+head(sort(e, decreasing = TRUE)) #get the top values
+tail(sort(e, decreasing = TRUE))
+#free vs paid
+
+typemean <- vector(length =2, mode= "numeric")
+typemean[1] <- mean(newData[newData$type == "Free", 2])
+typemean[2] <- mean(newData[newData$type == "Paid", 2])
+
+plot(rating ~ lastupdated, data = newData)
+summary(lm(rating~lastupdated, data= newData))
